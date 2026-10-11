@@ -1,0 +1,60 @@
+default_host: 127.0.0.1
+head_server:
+  host: 127.0.0.1
+  port: 11900
+skip_venv_if_present: true
+uv_venv_dir: ${oc.env:POC_RUNTIME_DIR}
+nemo_gym_log_dir: ${oc.env:POC_LOG_DIR}
+observability_enabled: true
+model_call_capture_dir: ${oc.env:POC_RUN_DIR}/model-calls
+
+sandbox:
+  idegym:
+    connection:
+      orchestrator_url: ${oc.env:IDEGYM_ORCHESTRATOR_URL}
+      namespace: ${oc.env:IDEGYM_NAMESPACE,idegym}
+      username: ${oc.env:IDEGYM_AUTH_USERNAME}
+      password: ${oc.env:IDEGYM_AUTH_PASSWORD}
+      client_name: ${oc.env:IDEGYM_CLIENT_NAME,ml-in-pl-nemo-eval}
+      nodes_count: 0
+      request_timeout_s: 60
+    create:
+      server_name_prefix: ml-in-pl
+      run_as_root: false
+      ready_timeout_s: 300
+
+idegym_python:
+  resources_servers:
+    idegym_python:
+      entrypoint: app.py
+      domain: coding
+      verified: false
+      description: Tiny Python functions verified in IDEGym sandboxes
+      image: ghcr.io/jetbrains-research/ml-in-pl-2026-tutorial-public/idegym-server-20250520-slim:1.0.0
+      concurrency: 1
+      test_timeout_s: 5
+
+idegym_python_agent:
+  responses_api_agents:
+    simple_agent:
+      entrypoint: app.py
+      resources_server:
+        type: resources_servers
+        name: idegym_python
+      model_server:
+        type: responses_api_models
+        name: policy_model
+      max_steps: 1
+      datasets:
+        - name: tiny_python
+          type: validation
+          jsonl_fpath: data/sample.jsonl
+          license: Apache 2.0
+
+policy_model:
+  responses_api_models:
+    inference_provider:
+      entrypoint: app.py
+      base_url: ${oc.env:POC_MODEL_BASE_URL}
+      api_key: ${oc.env:POC_MODEL_API_KEY}
+      model: ${oc.env:POC_MODEL_NAME}

@@ -1,0 +1,32 @@
+[project]
+name = "module-2"
+version = "0.1.0"
+description = "ML in PL 2026, module 2: NeMo Gym evaluations with IDEGym sandbox verification"
+requires-python = ">=3.13.14,<3.14"
+dependencies = [
+    "nemo-gym[idegym]",
+    "click>=8.1",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+openenv = ["openenv", "openenv-tbench2-env"]
+
+[tool.uv.sources]
+openenv = { git = "https://github.com/huggingface/OpenEnv.git", rev = "8d3455ab91d28b46349b8bf01fc243d339cda260" }
+openenv-tbench2-env = { git = "https://github.com/huggingface/OpenEnv.git", rev = "8d3455ab91d28b46349b8bf01fc243d339cda260", subdirectory = "envs/tbench2_env" }
+nemo-gym = { git = "https://github.com/vpoliakov-pixel/Gym.git", rev = "551daec99c81ac43c121ed8071798e3d5f9fc59c" }
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.12"]
+
+[tool.ruff]
+line-length = 119
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

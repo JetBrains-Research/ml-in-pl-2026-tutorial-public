@@ -1,0 +1,230 @@
+# Cloud-only recipe used by the validated workshop build.
+# The staged context contains pinned IDEGym 0.12.0 plugin assets and an empty workspace.
+# No repository checkout, exercise, verifier, or credentials are included.
+images:
+- name: ml-in-pl-workshop-pycharm-mcp
+  base_dockerfile: |
+    FROM ghcr.io/jetbrains-research/ml-in-pl-2026-tutorial-public/idegym-server-20250520-slim:1.0.0
+
+    SHELL ["/bin/bash", "-c"]
+
+    USER root
+
+    ENV IDEGYM_PROJECT_ROOT="/home/appuser/work"
+
+    # Copy local project
+    COPY --chown=appuser:appuser ["workspace", "/home/appuser/work"]
+
+    # Install PyCharm 2026.1.1
+    # https://www.jetbrains.com/pycharm/download/other.html
+    # Requires 2026.1.1+; older versions are not supported.
+    #
+    # PyCharm has no headless mode, so Xvfb is always installed and the start script runs the IDE
+    # against a virtual display; see the PyCharm plugin docstring.
+    USER root
+    RUN set -eux; \
+        apt-get update -qq; \
+        apt-get install -y --no-install-recommends \
+            ca-certificates curl unzip xvfb procps socat xdotool \
+            libxtst6 libxrender1 libxi6 libfreetype6 fontconfig; \
+        apt-get clean; \
+        rm -rf /var/lib/apt/lists/*
+
+    ENV PYCHARM_VERSION="2026.1.1"
+    ENV IDE_DIR="/opt/pycharm"
+    ENV IDE_CONFIG_PATH="/tmp/ide-config"
+    RUN set -eux; \
+        arch=$(dpkg --print-architecture); \
+        case "$arch" in \
+            amd64) suffix="" ;; \
+            arm64) suffix="-aarch64" ;; \
+            *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
+        esac; \
+        archive="pycharm-2026.1.1${suffix}.tar.gz"; \
+        curl -fsSL "https://download.jetbrains.com/python/${archive}" -o /tmp/pycharm.tar.gz; \
+        curl -fsSL "https://download.jetbrains.com/python/${archive}.sha256" -o /tmp/pycharm.sha256; \
+        expected=$(cut -d' ' -f1 /tmp/pycharm.sha256); \
+        echo "$expected  /tmp/pycharm.tar.gz" | sha256sum -c -; \
+        mkdir -p ${IDE_DIR}; \
+        tar -xzf /tmp/pycharm.tar.gz -C ${IDE_DIR} --strip-components=1; \
+        rm /tmp/pycharm.tar.gz /tmp/pycharm.sha256
+
+    ENV JAVA_HOME="${IDE_DIR}/jbr"
+    ENV PATH="${JAVA_HOME}/bin:${IDE_DIR}/bin:${PATH}"
+    ENV DISPLAY=":99"
+    # IDE-specific config for the shared start-ide entrypoint (installed as /usr/local/bin/start-ide).
+    # PyCharm has no headless mode, so IDE_SUPPORTS_HEADLESS=false and the entrypoint always starts Xvfb.
+    ENV IDE_NAME="PyCharm"
+    ENV IDE_LAUNCHER="pycharm.sh"
+    ENV IDE_LOG_FILE="/tmp/pycharm.log"
+    ENV IDE_LAUNCH_ARGS="-Dide.show.tips.on.startup.default.value=false -Djb.consents.confirmation.enabled=false"
+    ENV IDE_SUPPORTS_HEADLESS="false"
+
+    # Append JVM/startup flags to vmoptions, one per line so the list stays readable and reviewable.
+    # These apply to every JVM invocation (including inspect.sh): -Didea.config.path avoids XDG
+    # detection failures, -Dide.trust.all.projects suppresses the "Trust Project?" dialog, and the
+    # rest suppress first-run/consent/update dialogs and tune the JVM for containers.
+    RUN set -eux; \
+        for f in "${IDE_DIR}/bin/pycharm64.vmoptions" "${IDE_DIR}/bin/pycharm.vmoptions"; do \
+            [ -f "$f" ] || continue; \
+            printf '%s\n' \
+                '' \
+                '-Didea.config.path=/tmp/ide-config' \
+                '-Dide.trust.all.projects=true' \
+                '-Djb.privacy.policy.text=<!--999.999-->' \
+                '-Dide.firstStartup=false' \
+                '-Dide.no.platform.update=true' \
+                '-Djb.consents.confirmation.enabled=false' \
+                '-Dide.show.tips.on.startup.default.value=false' \
+                '-Dide.browser.jcef.enabled=false' \
+                '-Dsun.net.client.defaultConnectTimeout=5000' \
+                '-Dsun.net.client.defaultReadTimeout=10000' \
+                '-XX:-UsePerfData' \
+                '-XX:+PerfDisableSharedMem' \
+                '-XX:-UseLargePages' \
+                '-Xshare:off' \
+                '-XX:+UseContainerSupport' \
+                '-XX:ErrorFile=/tmp/jvm-crash.log' \
+                >> "$f"; \
+        done
+
+    # Pre-accept the data-sharing consent, disable the cloud/marketplace plugins and the
+    # OS-integration daemon (which refuses to run as root and takes the IDE down), and suppress
+    # the What's New editor so nothing blocks startup.
+    RUN set -eux; \
+        mkdir -p "/tmp/ide-config/options"; \
+        mkdir -p /root/.local/share/JetBrains/consentOptions; \
+        printf '%s\n' \
+            'rsch.send.usage.stat:1.1:1:1700000000000' \
+            > /root/.local/share/JetBrains/consentOptions/accepted; \
+        printf '%s\n' \
+            'com.intellij.marketplace' \
+            'com.intellij.settingsSync' \
+            'com.jetbrains.codeWithMe' \
+            'com.intellij.platform.daemon' \
+            > "/tmp/ide-config/disabled_plugins.txt"; \
+        printf '%s\n' \
+            '<application>' \
+            '  <component name="UpdatesConfigurable">' \
+            '    <option name="SHOW_WHATS_NEW_EDITOR" value="false" />' \
+            '  </component>' \
+            '</application>' \
+            > "/tmp/ide-config/options/updates.xml"; \
+        printf '%s\n' \
+            '<application>' \
+            '  <component name="PropertyService"><![CDATA[{' \
+            '  "keyToString": {' \
+            '    "whats.new.last.shown.version": "9999-9.9-99999"' \
+            '  }' \
+            '}]]></component>' \
+            '</application>' \
+            > "/tmp/ide-config/options/other.xml"
+
+    # Enable the JetBrains MCP server plugin (bundled in 2026.1.1+).
+    # Versions / manual download: https://plugins.jetbrains.com/plugin/26071-mcp-server/versions
+    # Binds to 127.0.0.1:64342; the start script bridges it to 0.0.0.0:64343.
+    RUN set -eux; \
+        mkdir -p "/tmp/ide-config/options"; \
+        printf '%s\n' \
+            '<application>' \
+            '  <component name="McpServerSettings">' \
+            '    <option name="enableMcpServer" value="true" />' \
+            '    <option name="enableBraveMode" value="true" />' \
+            '  </component>' \
+            '</application>' \
+            > "/tmp/ide-config/options/mcpServer.xml"
+
+    # Install the open-project plugin into the bundled plugins dir so it is present before the "open"
+    # AppStarter command is dispatched. Pre-built ZIP checked into the repo to avoid a Gradle build stage.
+    # (plugins/pycharm is the per-IDE build-context path holding the prebuilt zip.)
+    COPY plugins/pycharm/project-opener/project-opener.zip /tmp/open-project.zip
+    RUN set -eux; \
+        unzip -qo /tmp/open-project.zip -d "${IDE_DIR}/plugins/" && rm /tmp/open-project.zip
+
+    # Trust/first-run settings files and the shared start-ide entrypoint are appended by the plugin's
+    # render() (render_open_project_config + render_entrypoint_install). start-ide brings up the display
+    # if the IDE needs one, waits for MCP on 64342, then bridges
+    # 0.0.0.0:64343 -> 127.0.0.1:64342 via socat.
+
+    # Trust the project path and suppress first-run wizard / EUA dialogs.
+    RUN set -eux; \
+        mkdir -p "/tmp/ide-config/options"; \
+        printf '%s\n' \
+            '<application>' \
+            '  <component name="PropertiesComponent">' \
+            '    <property name="toolwindow.stripes.buttons.added" value="true" />' \
+            '  </component>' \
+            '</application>' \
+            > "/tmp/ide-config/options/other.xml"; \
+        printf '%s\n' \
+            '<application>' \
+            '  <component name="GeneralSettings">' \
+            '    <option name="showTipsOnStartup" value="false" />' \
+            '  </component>' \
+            '</application>' \
+            > "/tmp/ide-config/options/ide.general.xml"; \
+        printf '%s\n' \
+            '<application>' \
+            '  <component name="Trusted.Paths.Settings">' \
+            '    <option name="TRUSTED_PATHS">' \
+            '      <list>' \
+            '        <option value="/home/appuser/work" />' \
+            '      </list>' \
+            '    </option>' \
+            '    <option name="TRUSTED_PROJECT_LOCATORS">' \
+            '      <list />' \
+            '    </option>' \
+            '  </component>' \
+            '</application>' \
+            > "/tmp/ide-config/options/trusted-paths.xml"
+
+    # The check-mcp probe and start-ide entrypoint are IDE-agnostic (IDE-specific config is baked
+    # in as ENV) and shared by the idea/pycharm plugins, under a single command + supervisord
+    # program. Installed without the .sh suffix so the names survive IdeGYMServer's
+    # /usr/local/bin/*.{py,sh} -> bare-command rename pass (which would otherwise break the
+    # supervisord command and start-ide's internal source of check-mcp).
+    COPY plugins/plugin-utils/scripts/check-mcp.sh /usr/local/bin/check-mcp
+    COPY plugins/plugin-utils/scripts/start-ide.sh /usr/local/bin/start-ide
+    RUN chmod +x /usr/local/bin/check-mcp /usr/local/bin/start-ide
+    COPY plugins/plugin-utils/scripts/supervisord-ide.conf /etc/supervisor/conf.d/ide.conf
+
+
+    USER root
+
+    # Register MCP upstream: pycharm
+    RUN set -eux; \
+        mkdir -p /etc/idegym/mcp-upstreams.d && \
+        printf '%s\n' '{"url": "http://localhost:64342"}' > /etc/idegym/mcp-upstreams.d/pycharm.json
+
+    # Register MCP upstream: pycharm
+    RUN set -eux; \
+        mkdir -p /etc/idegym/mcp-upstreams.d && \
+        printf '%s\n' '{"url": "http://localhost:64342/stream"}' > /etc/idegym/mcp-upstreams.d/pycharm.json
+
+    # Adjust file ownership and permissions
+    RUN set -eux; \
+        chown -R appuser:appuser /usr/local/bin/start-ide && \
+        chown -R appuser:appuser /opt/idegym/server/mcp_proxy.py && \
+        chown -R appuser:appuser /tmp/ide-config
+
+    # Create or update user appuser
+    RUN set -eux; \
+        if getent group appuser >/dev/null 2>&1; then current_gid="$(getent group appuser | cut -d: -f3)"; if [ "$current_gid" != "1000" ]; then groupmod -g 1000 appuser; fi; else groupadd -g 1000 appuser; fi && \
+        if id -u appuser >/dev/null 2>&1; then usermod -u 1000 -g appuser -d /home/appuser -s /bin/bash appuser; :; else useradd -u 1000 -g appuser  -d /home/appuser -s /bin/bash -m appuser; fi && \
+        mkdir -p /home/appuser && \
+        chown -R appuser:appuser /home/appuser && \
+        rm -f /etc/sudoers.d/appuser
+
+    USER appuser
+
+    RUN set -eux; \
+        /opt/idegym/.venv/bin/python -c 'from pathlib import Path; p=Path("/usr/local/bin/start-ide"); s=p.read_text(); old='"'"'OPEN_ARGS=("open" "${PROJECT}")'"'"'; assert s.count(old)==1, "Pinned launcher changed"; p.write_text(s.replace(old, '"'"'OPEN_ARGS=("${PROJECT}")'"'"'))' && \
+        /opt/idegym/.venv/bin/python -c 'from pathlib import Path; p=Path("/opt/idegym/server/mcp_proxy.py"); s=p.read_text(); old="create_proxy(url, name=name)"; assert s.count(old)==1, "Pinned MCP proxy changed"; s=s.replace("from fastmcp import FastMCP", "from fastmcp import Client, FastMCP"); p.write_text(s.replace(old, "create_proxy(Client(url, roots=[Path(\"/home/appuser/work\").as_uri()]), name=name)"))' && \
+        printf '%s\n' '<application><component name="GeneralSettings"><option name="showTipsOnStartup" value="false" /></component><component name="Registry"><entry key="ide.experimental.ui.onboarding" value="false" /></component></application>' > /tmp/ide-config/options/ide.general.xml && \
+        test -d /home/appuser/work && \
+        test -x /opt/pycharm/bin/pycharm.sh
+
+    LABEL org.opencontainers.image.source="https://github.com/JetBrains-Research/ml-in-pl-2026-tutorial-public"
+  context_uri: gs://gke-dev-dws-jbr-idegym-build-context-eu-west-4/workshop-pycharm/8200146c19df4d1cb180898ba7856dab5a7fbf5885589dbdd2e945f995cf1a89.tar.gz
+  platforms:
+  - linux/amd64

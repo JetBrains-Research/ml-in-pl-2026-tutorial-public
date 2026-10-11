@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+.venv/
+.runtime/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+tutorial-modules/module-2/outputs/
+
+# Keep private evaluation logs local; report data and model/tool traces remain visible.
+**/results/**/gym.log
+**/results/**/logs/
+**/results/**/openenv-client.log

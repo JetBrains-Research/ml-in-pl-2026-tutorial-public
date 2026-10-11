@@ -1,0 +1,3 @@
+# Run evidence stays local; each invocation creates a new complete bundle.
+/results/
+/outputs/

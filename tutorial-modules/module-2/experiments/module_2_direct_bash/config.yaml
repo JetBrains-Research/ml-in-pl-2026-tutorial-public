@@ -1,0 +1,38 @@
+# All calculator demos use data/task.jsonl; regenerate Gym's cached dataset statistics per run.
+overwrite_metrics_conflicts: true
+default_host: 127.0.0.1
+head_server:
+  host: 127.0.0.1
+  port: 11900
+skip_venv_if_present: true
+uv_venv_dir: ${oc.env:POC_RUNTIME_DIR}
+nemo_gym_log_dir: ${oc.env:POC_LOG_DIR}
+observability_enabled: true
+model_call_capture_dir: ${oc.env:POC_RUN_DIR}/model-calls
+
+bash_agent:
+  responses_api_agents:
+    bash_agent:
+      entrypoint: app.py
+      model_server:
+        type: responses_api_models
+        name: policy_model
+      shell:
+        mode: bash
+        image: ghcr.io/jetbrains-research/ml-in-pl-2026-tutorial-public/idegym-server-20250520-slim:1.0.0
+        ready_timeout: 600
+        tool_timeout: 120
+      step_limit: 20
+      datasets:
+        - name: calculator_rename
+          type: validation
+          jsonl_fpath: data/task.jsonl
+          license: Apache 2.0
+
+policy_model:
+  responses_api_models:
+    inference_provider:
+      entrypoint: app.py
+      base_url: ${oc.env:POC_MODEL_BASE_URL}
+      api_key: ${oc.env:POC_MODEL_API_KEY}
+      model: ${oc.env:POC_MODEL_NAME}

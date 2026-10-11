@@ -1,0 +1,26 @@
+[project]
+name = "module-1"
+version = "0.1.0"
+description = "ML in PL 2026, module 1: IdeGYM sandboxes from a laptop to a cluster"
+requires-python = ">=3.12"
+dependencies = [
+    "idegym-client==0.13.0",
+    "python-dotenv>=1.0",
+    "openai>=1.80",
+    "openenv-core @ git+https://github.com/meta-pytorch/OpenEnv.git@2faae32750487168419afb4f1f8dc4a9efaac5c7",
+    "structlog>=25",
+    "idegym-image-builder==0.13.0",
+    "idegym-plugins==0.13.0",
+]
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["ruff>=0.12"]
+
+[tool.ruff]
+line-length = 119
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
